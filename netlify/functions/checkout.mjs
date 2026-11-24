@@ -1,6 +1,6 @@
 import Stripe from 'stripe';
 import crypto from 'node:crypto';
-import { json, getSession } from './_shared.mjs';
+import { json, getSession, subscriptionFor, activePlan, store } from './_shared.mjs';
 const TEAM_LINKS = { monthly: 'https://buy.stripe.com/test_00wbIUefccpD9i321Bd7q01', yearly: 'https://buy.stripe.com/test_28E7sE9YWdtHfGr9u3d7q00' };
 function signedReference(userId) {
   const sig = crypto.createHmac('sha256', process.env.SESSION_SECRET).update(`team-checkout:${userId}`).digest('base64url');
@@ -13,6 +13,22 @@ export default async event => {
   const plan=['pro','team'].includes(body.plan)?body.plan:null;
   const interval=['monthly','yearly'].includes(body.interval)?body.interval:'monthly';
   if(!plan) return json(400,{error:'Choose a valid plan.'});
+  const existingSubscription = await subscriptionFor(user.id);
+  const currentPlan = activePlan(existingSubscription);
+  const memberTeamId = await store.get(`teamMembership:${user.id}`);
+  const memberTeam = memberTeamId ? await store.get(`team:${memberTeamId}`, { type: 'json' }) : null;
+  const isActiveTeamMember = Boolean(memberTeam && memberTeam.status !== 'suspended');
+
+  if (
+    (plan === 'pro' && (currentPlan === 'pro' || currentPlan === 'team' || isActiveTeamMember)) ||
+    (plan === 'team' && (currentPlan === 'team' || isActiveTeamMember))
+  ) {
+    return json(409, {
+      error: currentPlan === 'team' || isActiveTeamMember
+        ? 'Your account already has Team access, which includes Pro.'
+        : 'You already have an active Pro subscription. You cannot buy Pro again.'
+    });
+  }
   const base=(process.env.SITE_URL || 'https://flowstate-dev.netlify.app').replace(/\/$/,'');
   if(plan==='team') {
     const link=TEAM_LINKS[interval];

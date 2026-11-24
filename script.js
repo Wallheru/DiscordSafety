@@ -154,11 +154,78 @@
     try{const response=await fetch('/api/team-workflows',{method:'POST',credentials:'same-origin',headers:{'content-type':'application/json'},body:JSON.stringify({workflows})});const data=await response.json();if(!response.ok)throw new Error(data.error||'Could not share workflows');document.querySelector('#teamSharedStatus').textContent=`Shared ${data.count} workflow${data.count===1?'':'s'} with your team.`;notify('Your workflows are now shared with the team.');}catch(error){notify(error.message||'Could not share workflows.');}finally{button.disabled=false;}
   });
 
-  const planLimits = { starter: { name: 'Starter', workflows: 3, runs: Infinity }, pro: { name: 'Pro', workflows: Infinity, runs: Infinity }, team: { name: 'Team', workflows: Infinity, runs: Infinity } };
+  const planLimits = { starter: { name: 'Starter', workflows: 3, runs: Infinity }, pro: { name: 'Pro', workflows: 1000, runs: Infinity }, team: { name: 'Team', workflows: 1000, runs: Infinity } };
   let accountState = { user: null, plan: 'starter', subscriptionStatus: 'none' };
   let accountReady = false;
   try { localStorage.removeItem('flowstate-plan-v1'); } catch {}
   function currentPlan() { const key = Object.hasOwn(planLimits, accountState.plan) ? accountState.plan : 'starter'; return { key, ...planLimits[key] }; }
+  function renderSubscriptionCountdown() {
+    const proLink = document.querySelector('.checkout-plan[data-plan="pro"]');
+    const teamLink = document.querySelector('.checkout-plan[data-plan="team"]');
+    const proCard = proLink?.closest('.price-card');
+    if (!proCard) return;
+
+    const plan = accountState.plan || 'starter';
+    const active = ['active', 'trialing', 'team-member'].includes(accountState.subscriptionStatus);
+    const hasPro = active && ['pro', 'team'].includes(plan);
+
+    let status = proCard.querySelector('[data-subscription-countdown]');
+    if (!hasPro) {
+      if (status) status.remove();
+      if (proLink) {
+        proLink.style.display = '';
+        proLink.textContent = 'Subscribe to Pro ↗';
+      }
+      if (teamLink) {
+        teamLink.style.display = '';
+        teamLink.textContent = 'Subscribe to Team ↗';
+      }
+      return;
+    }
+
+    if (proLink) proLink.style.display = 'none';
+    if (teamLink) {
+      teamLink.style.display = plan === 'team' ? 'none' : '';
+    }
+
+    if (!status) {
+      status = document.createElement('p');
+      status.dataset.subscriptionCountdown = 'true';
+      status.className = 'plan-caption';
+      status.setAttribute('aria-live', 'polite');
+      proLink?.insertAdjacentElement('afterend', status);
+    }
+
+    if (plan === 'team') {
+      status.textContent = 'Team active · Pro features included';
+      if (teamLink) teamLink.style.display = 'none';
+      return;
+    }
+
+    const endSeconds = Number(accountState.currentPeriodEnd);
+    const endMs = endSeconds * 1000;
+    if (!Number.isFinite(endMs) || endMs <= 0) {
+      status.textContent = 'Pro active · subscription status is up to date';
+      return;
+    }
+
+    const remaining = Math.max(0, endMs - Date.now());
+    if (remaining === 0) {
+      status.textContent = 'Billing period ended · waiting for Stripe to update your plan…';
+      return;
+    }
+
+    const days = Math.floor(remaining / 86400000);
+    const hours = Math.floor((remaining % 86400000) / 3600000);
+    const minutes = Math.floor((remaining % 3600000) / 60000);
+    const seconds = Math.floor((remaining % 60000) / 1000);
+    const timeLeft = (days ? days + 'd ' : '') + hours + 'h ' + minutes + 'm ' + seconds + 's';
+
+    status.textContent = accountState.cancelAtPeriodEnd
+      ? 'Pro access ends in ' + timeLeft
+      : 'Next Pro renewal in ' + timeLeft;
+  }
+
   async function refreshAccount() {
     try { const response = await fetch('/api/me', { credentials: 'same-origin', headers: { 'accept': 'application/json' } }); if (!response.ok) throw new Error('Could not load account'); accountState = await response.json(); } catch { accountState = { user: null, plan: 'starter', subscriptionStatus: 'none' }; }
     if (accountState.user) {
@@ -177,9 +244,12 @@
     if (button) { button.textContent = accountState.user ? `@${accountState.user.username} · ${currentPlan().name} · Sign out` : 'Sign in with Discord'; button.href = accountState.user ? '/api/logout' : '/api/login'; }
     await refreshTeamWorkspace();
     accountReady = true;
+    renderSubscriptionCountdown();
     refreshDashboard();
   }
   refreshAccount();
+  setInterval(renderSubscriptionCountdown, 1000);
+  setInterval(() => { if (accountReady) refreshAccount(); }, 30000);
   function monthRunCount() {
     const prefix = dateKey(new Date()).slice(0, 7);
     return Object.entries(metrics.previewRunsByDay || {}).reduce((sum, [day, count]) => day.startsWith(prefix) ? sum + (Number(count) || 0) : sum, 0);
@@ -189,7 +259,7 @@
     const plan = currentPlan();
     const copy = kind === 'runs'
       ? ['You’ve used all ' + plan.runs + ' runs this month', 'The ' + plan.name + ' plan includes ' + plan.runs + ' runs per month. Upgrade to Pro for unlimited runs, or wait until next month.']
-      : ['You’ve reached ' + plan.workflows + ' active workflows', 'The ' + plan.name + ' plan includes ' + plan.workflows + ' active workflows. Upgrade to Pro for unlimited workflows, or delete one you no longer need.'];
+      : ['You’ve reached ' + plan.workflows + ' active workflows', 'The ' + plan.name + ' plan includes ' + plan.workflows + ' active workflows. Upgrade to Pro for up to 1,000 cloud-synced workflows, or delete one you no longer need.'];
     modal.querySelector('.upgrade-eyebrow').textContent = plan.name.toUpperCase() + ' PLAN LIMIT';
     modal.querySelector('#upgradeTitle').textContent = copy[0];
     modal.querySelector('.upgrade-text').textContent = copy[1];

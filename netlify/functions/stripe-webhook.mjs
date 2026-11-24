@@ -131,6 +131,8 @@ async function saveSubscription(subscription, eventCreated, paymentStatus) {
     subscription_id: subscription.id,
     customer_id: getId(subscription.customer),
     current_period_end: subscription.current_period_end,
+    cancel_at_period_end: Boolean(subscription.cancel_at_period_end),
+    cancel_at: subscription.cancel_at || null,
     last_event_created: eventCreated
   };
 
