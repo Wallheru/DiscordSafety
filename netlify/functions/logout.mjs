@@ -1,0 +1,1 @@
+export default async () => new Response(null, { status: 302, headers: { Location: '/', 'Set-Cookie':'flowstate_session=; HttpOnly; Secure; SameSite=Lax; Path=/; Max-Age=0', 'cache-control':'no-store' } });
